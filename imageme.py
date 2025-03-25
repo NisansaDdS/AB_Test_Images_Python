@@ -11,7 +11,7 @@ what's called.
 """
 
 # Dependencies
-import base64, io, os, re, sys, threading, SimpleHTTPServer, SocketServer
+import base64, io, os, re, sys, threading, http.server, socketserver
 # Attempt to import PIL - if it doesn't exist we won't be able to make use of
 # some performance enhancing goodness, but imageMe will still work fine
 PIL_ENABLED = False
@@ -26,14 +26,21 @@ except ImportError:
         'performance you could out of imageMe. Install Pillow (' +\
         'https://github.com/python-pillow/Pillow) to enable support.'
     )
+import random
+import math
 
+REPLACEMENT_PROBABILITY=50
 # Constants / configuration
 ## Filename of the generated index files
 INDEX_FILE_NAME = 'imageme.html'
 ## Regex for matching only image files
 IMAGE_FILE_REGEX = '^.+\.(png|jpg|jpeg|tif|tiff|gif|bmp)$'
 ## Images per row of the gallery tables
-IMAGES_PER_ROW = 3
+IMAGES_PER_ROW = 2
+
+TOP_IMAGE_COUNT=12
+ELO_TOLLERENCE=20
+
 ## Resampling mode to use when thumbnailing
 RESAMPLE = None if not PIL_ENABLED else Image.NEAREST
 ## Width in pixels of thumnbails generated with PIL
@@ -54,6 +61,9 @@ class BackgroundIndexFileGenerator:
     def run(self):
         self.thread.start()
 
+import json
+
+
 def _clean_up(paths):
     """
     Clean up after ourselves, removing created files.
@@ -68,6 +78,54 @@ def _clean_up(paths):
     for path in paths:
         print('Removing %s' % path)
         os.unlink(path)
+    with open('eloRating.json', 'w') as fp:
+        json.dump(eloRating, fp)
+
+selectedCounts=dict()
+
+def selectImages(image_files):
+    if len(selectedCounts)>0:
+        print("Max Represntation "+str(max(list(selectedCounts.values()))))
+    
+    if(len(image_files)>len(eloRating)): # new images has been added they need to be prioritized
+        candidates=[i  for i in image_files if i.split(".")[0] not in  eloRating]
+        selected_image_files=random.sample(candidates, 2)
+    else:    # Now do general selection
+        if len(selectedCounts)==0 or (random.randrange(100)>REPLACEMENT_PROBABILITY): 
+            selected_image_files=random.sample(image_files, 2)
+        else:
+            if len(selectedCounts)==0:
+                for i in image_files:
+                    selectedCounts[i]=0
+            maxCount=max(selectedCounts.values())
+            candidateList=list()
+            for i in image_files:
+                if i not in selectedCounts:
+                    selectedCounts[i]=0
+                j=max(1,maxCount-selectedCounts[i]+1) # at least once
+                for k in range(j):
+                    candidateList.append(i)
+            selected_image_files=random.sample(candidateList, 2)
+    
+        
+    if(eloRange>0):
+        a=selected_image_files[0].split(".")[0]
+        b=selected_image_files[1].split(".")[0]
+        if(a in eloRating and b in eloRating): # This check workd only if both in the system already
+            if(abs(eloRating[a]-eloRating[b])>(ELO_TOLLERENCE*eloRange)/100): # Gap is larger than tollerence
+                return(selectImages(image_files))            
+            
+            
+    if len(set(selected_image_files))>1: # Avoiding the same image coming twice.
+        for i in selected_image_files:
+            if i in selectedCounts:
+                selectedCounts[i]+=1
+            else:
+                selectedCounts[i]=1
+        return(selected_image_files)
+    else:
+        return(selectImages(image_files))
+
 
 def _create_index_file(
         root_dir, location, image_files, dirs, force_no_processing=False):
@@ -97,7 +155,7 @@ def _create_index_file(
     # Put together HTML as a list of the lines we'll want to include
     # Issue #2 exists to do this better than HTML in-code
     header_text = \
-        'imageMe: ' + location + ' [' + str(len(image_files)) + ' image(s)]'
+        'imageMe: ' + location + ' [' + str(len(image_files)) + ' image(s)] '
     html = [
         '<!DOCTYPE html>',
         '<html>',
@@ -111,13 +169,18 @@ def _create_index_file(
         '                padding-left: 4em;',
         '                padding-right: 4em;',
         '            }',
-        '            .image {max-width: 100%; border-radius: 0.3em;}',
-        '            td {width: ' + str(100.0 / IMAGES_PER_ROW) + '%;}',
+        '            .image {max-width: 100%; width: 70%; border-radius: 0.3em;}',
+        '            table {width: 100%;}',
+        '            .ABtd {width: ' + str(100.0 / IMAGES_PER_ROW) + '%; text-align: center;}',
+        '            .toptd {width: ' + str(100.0 / TOP_IMAGE_COUNT) + '%; text-align: center;}',
+        
+        
+        
         '        </style>',
         '    </head>',
         '    <body>',
         '    <div class="content">',
-        '        <h2 class="header">' + header_text + '</h2>'
+        '        <h2 class="header"><a href="'+INDEX_FILE_NAME+'">Reload</a> ' + header_text + '</h2>'
     ]
     # Populate the present subdirectories - this includes '..' unless we're at
     # the top level
@@ -140,7 +203,19 @@ def _create_index_file(
     table_row_count = 1
     html += ['<hr>', '<table>']
     # For each image file, potentially create a new <tr> and create a new <td>
-    for image_file in image_files:
+    
+    
+    selected_image_files=selectImages(image_files)
+    
+    
+   # if(len(eloRating)>0) & (random.randrange(100)>REPLACEMENT_PROBABILITY) & (selected_image_files[0].split(".")[0] not in eloRating):
+   #     replaceCandidate=random.choice(list(eloRating.keys()))+".png"
+   #     if selected_image_files[0]!=replaceCandidate:
+   #         selected_image_files[1]=replaceCandidate
+    #print(image_files)
+    
+    
+    for image_file in selected_image_files:
         if table_row_count == 1:
             html.append('<tr>')
         img_src = _get_thumbnail_src_from_file(
@@ -149,20 +224,34 @@ def _create_index_file(
         link_target = _get_image_link_target_from_file(
             location, image_file, force_no_processing
         )
+        loser=""
+        for l in selected_image_files:
+            if l not in image_file:
+                loser=l
+                break
         html += [
-            '    <td>',
-            '    <a href="' + link_target + '">',
-            '        <img class="image" src="' + img_src + '">',
-            '    </a>',
+            '    <td class="ABtd">',
+            '<form action="/'+INDEX_FILE_NAME+'">'
+            '<input type="hidden" name="w" value="' +link_target+ '">',
+            '<input type="hidden" name="l" value="' +loser  + '">',
+            '        <input type="image" class="image" src="' +link_target  + '"  name="submit"  >',  #img_src
+            '</form>',
             '    </td>'
         ]
         if table_row_count == IMAGES_PER_ROW:
             table_row_count = 0
             html.append('</tr>')
         table_row_count += 1
-    html += ['</tr>', '</table>']
+    html += ['</tr>', '</table>','<hr><h5>Top '+str(TOP_IMAGE_COUNT)+'</h5>','<table><tr>']
+    for ti in sorted(eloRating, key=eloRating.get, reverse=True)[:TOP_IMAGE_COUNT]:
+        html += [
+            '    <td class="toptd">',
+            '<img src="'+ti+'.png" class="image" />',
+            '    </td>'
+            ]
     html += [
-        '    </div>',
+        '</tr></table>',
+        '    </div>',  
         '    </body>',
         '</html>'
     ]
@@ -416,6 +505,64 @@ def _get_thumbnail_src_from_file(dir_path, image_file, force_no_processing=False
     img = _get_thumbnail_image_from_file(dir_path, image_file)
     return _get_src_from_image(img, image_file)
 
+
+eloRating=dict()
+
+def loadElo():
+    global eloRating
+    if os.path.isfile("eloRating.json"):
+        with open('eloRating.json', 'r') as fp:
+            eloRating = json.load(fp)
+
+def updateElo(winner,loser):
+    global eloRating        
+    if winner in eloRating:
+        wRating=eloRating[winner]
+    else:
+        wRating=1
+    if loser in eloRating:
+        lRating=eloRating[loser]
+    else:
+        lRating=1 
+    print("Current Ratings: "+str(wRating)+" "+str(lRating))
+    eloRating[winner]=getNewEloRating(wRating,lRating,1)
+    eloRating[loser]=getNewEloRating(lRating,wRating,0)
+    
+
+def getEloRatingDelta(playerRating,opponantRating,result):
+    playerChanceToWin=1/(1+math.pow(10,(opponantRating-playerRating)/400))
+    return round(32*(result-playerChanceToWin))
+
+
+def getNewEloRating(playerRating,opponantRating,result):
+    return playerRating+getEloRatingDelta(playerRating,opponantRating,result)
+
+eloRange=-1
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    
+    def do_GET(self):
+        global eloRange
+       #this code execute when a GET request happen, then you have to check if the request happenned because the user pressed the button
+        if self.path.find("w=") != -1:
+            w=self.path.split("w=")[1].split(".")[0]
+            #print(w)
+        if self.path.find("l=") != -1:
+            l=self.path.split("l=")[1].split(".")[0]
+            #print(l)        
+        if self.path.find("w=") != -1 and self.path.find("l=") != -1:
+            updateElo(w,l)
+            print("Elo Count: "+str(len(eloRating)))
+            eloMin=min(eloRating.values())
+            eloMax=max(eloRating.values())
+            eloRange=eloMax-eloMin
+            print("Elo Range: ("+str(eloMin)+","+str(eloMax)+")")
+        created_files=serve_dir('.')
+            #do whatever you want
+        return super().do_GET()
+
+
+
 def _run_server():
     """
     Run the image server. This is blocking. Will handle user KeyboardInterrupt
@@ -429,11 +576,11 @@ def _run_server():
     # Configure allow_reuse_address to make re-runs of the script less painful -
     # if this is not True then waiting for the address to be freed after the
     # last run can block a subsequent run
-    SocketServer.TCPServer.allow_reuse_address = True
+    socketserver.TCPServer.allow_reuse_address = True
     # Create the server instance
-    server = SocketServer.TCPServer(
+    server = socketserver.TCPServer(
         ('', port),
-        SimpleHTTPServer.SimpleHTTPRequestHandler
+           Handler # http.server.SimpleHTTPRequestHandler # imgH #
     )
     # Print out before actually running the server (cheeky / optimistic, however
     # you want to look at it)
@@ -476,13 +623,15 @@ def serve_dir(dir_path):
         print('Performing PIL-enchanced optimised index file generation in background')
         background_indexer = BackgroundIndexFileGenerator(dir_path)
         background_indexer.run()
+    return(created_files)
+
+if __name__ == '__main__':    
+    loadElo()
+    # Generate indices and serve from the current directory downwards when run
+    # as the entry point
+    created_files=serve_dir('.')
     # Run the server in the current location - this blocks until it's stopped
     _run_server()
     # Clean up the index files created earlier so we don't make a mess of
     # the image directories
     _clean_up(created_files)
-
-if __name__ == '__main__':
-    # Generate indices and serve from the current directory downwards when run
-    # as the entry point
-    serve_dir('.')
