@@ -40,6 +40,7 @@ IMAGES_PER_ROW = 2
 
 TOP_IMAGE_COUNT=12
 ELO_TOLLERENCE=20
+ELO_BASE=1
 
 ## Resampling mode to use when thumbnailing
 RESAMPLE = None if not PIL_ENABLED else Image.NEAREST
@@ -73,11 +74,28 @@ def _clean_up(paths):
 
     @return {None}
     """
+
     print('Cleaning up')
     # Iterate over the given paths, unlinking them
     for path in paths:
         print('Removing %s' % path)
         os.unlink(path)
+
+    # Now we are re-normalizing the elo ratings so that the absolute min value is equal to the ELO_BASE, this way, we prevent catastrophic growth in both positive and negative directions    
+    eloMin=min(eloRating.values())
+    eloMax=max(eloRating.values())            
+    realEloMin=max(-eloMin,eloMax)
+    for e in eloRating:
+        realEloMin=min(realEloMin,abs(eloRating[e]))
+    if realEloMin>ELO_BASE:
+        offset=realEloMin-ELO_BASE
+        for e in eloRating:
+            if(eloRating[e]>0):
+                eloRating[e]-=offset
+            elif(eloRating[e]<0):
+                eloRating[e]+=offset 
+    
+
     with open('eloRating.json', 'w') as fp:
         json.dump(eloRating, fp)
 
@@ -526,11 +544,11 @@ def updateElo(winner,loser):
     if winner in eloRating:
         wRating=eloRating[winner]
     else:
-        wRating=1
+        wRating=ELO_BASE
     if loser in eloRating:
         lRating=eloRating[loser]
     else:
-        lRating=1 
+        lRating=ELO_BASE 
     print("Current Ratings: "+str(wRating)+" "+str(lRating))
     eloRating[winner]=getNewEloRating(wRating,lRating,1)
     eloRating[loser]=getNewEloRating(lRating,wRating,0)
@@ -545,6 +563,7 @@ def getNewEloRating(playerRating,opponantRating,result):
     return playerRating+getEloRatingDelta(playerRating,opponantRating,result)
 
 eloRange=-1
+
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     
