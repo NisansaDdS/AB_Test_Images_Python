@@ -32,7 +32,7 @@ import math
 REPLACEMENT_PROBABILITY=50
 # Constants / configuration
 ## Filename of the generated index files
-INDEX_FILE_NAME = 'imageme.html'
+INDEX_FILE_NAME = 'index.html'
 ## Regex for matching only image files
 IMAGE_FILE_REGEX = '^.+\.(png|jpg|jpeg|tif|tiff|gif|bmp)$'
 ## Images per row of the gallery tables
@@ -86,6 +86,8 @@ selectedCounts=dict()
 def selectImages(image_files):
     if len(selectedCounts)>0:
         print("Max Represntation "+str(max(list(selectedCounts.values()))))
+    if(len(image_files)<2):
+            return(image_files)
     
     if(len(image_files)>len(eloRating)): # new images has been added they need to be prioritized
         candidates=[i  for i in image_files if i.split(".")[0] not in  eloRating]
@@ -113,6 +115,7 @@ def selectImages(image_files):
         b=selected_image_files[1].split(".")[0]
         if(a in eloRating and b in eloRating): # This check workd only if both in the system already
             if(abs(eloRating[a]-eloRating[b])>(ELO_TOLLERENCE*eloRange)/100): # Gap is larger than tollerence
+                print("*********************************************************"+str(eloRating[a])+" "+str(eloRating[b]))
                 return(selectImages(image_files))            
             
             
@@ -155,12 +158,12 @@ def _create_index_file(
     # Put together HTML as a list of the lines we'll want to include
     # Issue #2 exists to do this better than HTML in-code
     header_text = \
-        'imageMe: ' + location + ' [' + str(len(image_files)) + ' image(s)] '
+        'ABtestPy: ' + location + ' [' + str(len(image_files)) + ' image(s)] '
     html = [
         '<!DOCTYPE html>',
         '<html>',
         '    <head>',
-        '        <title>imageMe</title>'
+        '        <title>ABtestPy</title>'
         '        <style>',
         '            html, body {margin: 0;padding: 0;}',
         '            .header {text-align: right;}',
@@ -180,7 +183,7 @@ def _create_index_file(
         '    </head>',
         '    <body>',
         '    <div class="content">',
-        '        <h2 class="header"><a href="'+INDEX_FILE_NAME+'">Reload</a> ' + header_text + '</h2>'
+        '        <h2 class="header"><a href=".">Reload</a> ' + header_text + '</h2>'
     ]
     # Populate the present subdirectories - this includes '..' unless we're at
     # the top level
@@ -192,6 +195,8 @@ def _create_index_file(
         html.append('<hr>')
     # For each subdirectory, include a link to its index file
     for directory in directories:
+        if directory.count(".")>0: # Ignoreing git and other hidden folders
+            continue
         link = directory + '/' + INDEX_FILE_NAME
         html += [
             '    <h3 class="header">',
@@ -242,7 +247,7 @@ def _create_index_file(
             table_row_count = 0
             html.append('</tr>')
         table_row_count += 1
-    html += ['</tr>', '</table>','<hr><h5>Top '+str(TOP_IMAGE_COUNT)+'</h5>','<table><tr>']
+    html += ['</tr>', '</table>','<hr><h5>Top '+str(min(TOP_IMAGE_COUNT,len(eloRating)))+'</h5>','<table><tr>']
     for ti in sorted(eloRating, key=eloRating.get, reverse=True)[:TOP_IMAGE_COUNT]:
         html += [
             '    <td class="toptd">',
@@ -283,6 +288,8 @@ def _create_index_files(root_dir, force_no_processing=False):
     # Walk the root dir downwards, creating index files as we go
     for here, dirs, files in os.walk(root_dir):
         print('Processing %s' % here)
+        if here.count(".")>1: # Ignoreing git and other hidden folders
+            continue
         # Sort the subdirectories by name
         dirs = sorted(dirs)
         # Get image files - all files in the directory matching IMAGE_FILE_REGEX
@@ -630,6 +637,7 @@ if __name__ == '__main__':
     # Generate indices and serve from the current directory downwards when run
     # as the entry point
     created_files=serve_dir('.')
+    
     # Run the server in the current location - this blocks until it's stopped
     _run_server()
     # Clean up the index files created earlier so we don't make a mess of
