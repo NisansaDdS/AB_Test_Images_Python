@@ -190,9 +190,9 @@ def _create_index_file(
         '                padding-left: 4em;',
         '                padding-right: 4em;',
         '            }',
-        '            .image {max-width: 100%; width: 70%; border-radius: 0.3em;}',
+        '            .image {max-width: 100%; max-height: 512px; border-radius: 0.3em;}',
         '            table {width: 100%;}',
-        '            .ABtd {width: ' + str(100.0 / IMAGES_PER_ROW) + '%; text-align: center;}',
+        '            .ABtd {width: ' + str(100.0 / IMAGES_PER_ROW) + '%; text-align: center;  }',
         '            .toptd {width: ' + str(100.0 / TOP_IMAGE_COUNT) + '%; text-align: center;}',
         
         
